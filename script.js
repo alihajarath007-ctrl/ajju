@@ -2030,3 +2030,218 @@ showScreen(loginPage);
     subtree: true
   });
 })();
+/* ========= STEP 2 AUTO SCROLL PATCH ONLY ========= */
+(function () {
+  if (window.__OM_STEP2_AUTOSCROLL_PATCH__) return;
+  window.__OM_STEP2_AUTOSCROLL_PATCH__ = true;
+
+  function isPhotoStepVisible() {
+    if (!photoPage) return false;
+
+    const style = window.getComputedStyle(photoPage);
+    const rect = photoPage.getBoundingClientRect();
+
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  function smoothScrollToStep2Target(target) {
+    if (!target || !isPhotoStepVisible()) return;
+
+    setTimeout(() => {
+      try {
+        target.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest"
+        });
+      } catch (e) {}
+    }, 220);
+  }
+
+  function smoothScrollToTopOfStep2() {
+    if (!photoPage || !isPhotoStepVisible()) return;
+
+    setTimeout(() => {
+      try {
+        photoPage.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+          inline: "nearest"
+        });
+      } catch (e) {}
+
+      try {
+        window.scrollTo({
+          top: Math.max(0, window.scrollY - 40),
+          behavior: "smooth"
+        });
+      } catch (e) {}
+    }, 220);
+  }
+
+  async function openCameraWithAutoScroll(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      if (analysisResult) analysisResult.innerHTML = "Camera is not supported on this device.";
+      return;
+    }
+
+    try {
+      if (typeof stopCameraTracks === "function") {
+        stopCameraTracks();
+      }
+
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+
+      if (cameraVideo) cameraVideo.srcObject = cameraStream;
+      if (cameraBox) cameraBox.classList.add("active");
+      if (analysisResult) {
+        analysisResult.innerHTML = "Camera opened. Keep only one clear face in the frame.";
+      }
+
+      smoothScrollToStep2Target(cameraBox || cameraVideo || analyzeBtn || photoPage);
+    } catch (e) {
+      if (analysisResult) {
+        analysisResult.innerHTML = "Unable to open camera. Please allow camera access or use Upload Photo.";
+      }
+    }
+  }
+
+  function closeCameraWithAutoBack(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    if (typeof stopCameraTracks === "function") {
+      stopCameraTracks();
+    }
+
+    if (cameraBox) cameraBox.classList.remove("active");
+
+    smoothScrollToTopOfStep2();
+  }
+
+  function captureSelfieWithAutoScroll(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    if (!cameraVideo || !cameraCanvas || !cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+      if (analysisResult) analysisResult.innerHTML = "Camera is not ready yet.";
+      return;
+    }
+
+    cameraCanvas.width = cameraVideo.videoWidth;
+    cameraCanvas.height = cameraVideo.videoHeight;
+
+    const ctx = cameraCanvas.getContext("2d");
+
+    if (cameraVideo.style.transform && cameraVideo.style.transform.includes("scaleX(-1)")) {
+      ctx.save();
+      ctx.translate(cameraCanvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+    }
+
+    uploadedFaceImage = cameraCanvas.toDataURL("image/jpeg", 0.92);
+
+    if (previewImage) previewImage.src = uploadedFaceImage;
+    if (previewArea) previewArea.style.display = "block";
+    if (analyzeBtn) analyzeBtn.disabled = false;
+    if (analysisResult) {
+      analysisResult.innerHTML = "Selfie captured. Now click Detect Face Tone.";
+    }
+
+    if (typeof stopCameraTracks === "function") {
+      stopCameraTracks();
+    }
+    if (cameraBox) cameraBox.classList.remove("active");
+
+    smoothScrollToStep2Target(analyzeBtn || previewArea || photoPage);
+  }
+
+  async function uploadPhotoWithAutoScroll(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+
+    uploadedFaceImage = await fileToDataURL(file);
+
+    if (previewImage) previewImage.src = uploadedFaceImage;
+    if (previewArea) previewArea.style.display = "block";
+    if (analyzeBtn) analyzeBtn.disabled = false;
+    if (analysisResult) {
+      analysisResult.innerHTML = "Photo selected. Now click Detect Face Tone.";
+    }
+
+    smoothScrollToStep2Target(analyzeBtn || previewArea || photoPage);
+  }
+
+  function replaceBtn(id, handler, key) {
+    const oldEl = document.getElementById(id);
+    if (!oldEl || !oldEl.parentNode || oldEl.dataset[key] === "1") return oldEl;
+
+    const newEl = oldEl.cloneNode(true);
+    newEl.dataset[key] = "1";
+    oldEl.parentNode.replaceChild(newEl, oldEl);
+    newEl.addEventListener("click", handler, false);
+    return newEl;
+  }
+
+  function bindStep2AutoScrollPatch() {
+    if (!photoPage) return;
+
+    const newOpenBtn = replaceBtn("openCameraBtn", openCameraWithAutoScroll, "step2AutoScrollOpen");
+    const newCloseBtn = replaceBtn("closeCameraBtn", closeCameraWithAutoBack, "step2AutoScrollClose");
+    const newCaptureBtn = replaceBtn("captureSelfieBtn", captureSelfieWithAutoScroll, "step2AutoScrollCapture");
+
+    if (newOpenBtn) window.openCameraBtn = newOpenBtn;
+    if (newCloseBtn) window.closeCameraBtn = newCloseBtn;
+    if (newCaptureBtn) window.captureSelfieBtn = newCaptureBtn;
+
+    if (uploadInput && uploadInput.dataset.step2AutoScrollUpload !== "1") {
+      uploadInput.dataset.step2AutoScrollUpload = "1";
+      uploadInput.addEventListener("change", uploadPhotoWithAutoScroll, false);
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindStep2AutoScrollPatch);
+  } else {
+    bindStep2AutoScrollPatch();
+  }
+
+  const observer = new MutationObserver(() => {
+    bindStep2AutoScrollPatch();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+})();
