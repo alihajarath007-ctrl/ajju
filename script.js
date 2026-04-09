@@ -1840,3 +1840,193 @@ showScreen(loginPage);
   renderFavorites();
   setLauncherVisibility();
 })();
+/* ========= OUTFITMATCH SELFIE MIRROR FIX (ACTUAL APP PATCH) ========= */
+(function () {
+  if (window.__OM_SELFIE_UNMIRROR_PATCH__) return;
+  window.__OM_SELFIE_UNMIRROR_PATCH__ = true;
+
+  function applyUnmirrorPreview() {
+    if (!cameraVideo) return;
+    cameraVideo.style.transform = "scaleX(-1)";
+    cameraVideo.style.webkitTransform = "scaleX(-1)";
+    cameraVideo.style.objectFit = "cover";
+  }
+
+  function scrollToDetectToneButton() {
+    if (!analyzeBtn) return;
+    setTimeout(() => {
+      try {
+        analyzeBtn.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest"
+        });
+      } catch (e) {}
+    }, 250);
+  }
+
+  async function openCameraUnmirrored(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    try {
+      if (typeof stopTracksSafe === "function") stopTracksSafe();
+      else if (typeof stopCameraTracks === "function") stopCameraTracks();
+
+      const constraints = {
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: 1280 },
+          height: { ideal: 1280 }
+        },
+        audio: false
+      };
+
+      if (typeof requestUserCamera === "function") {
+        cameraStream = await requestUserCamera(constraints);
+      } else {
+        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
+      if (cameraVideo) {
+        cameraVideo.setAttribute("playsinline", "true");
+        cameraVideo.setAttribute("autoplay", "true");
+        cameraVideo.muted = true;
+        cameraVideo.srcObject = cameraStream;
+
+        try {
+          await cameraVideo.play();
+        } catch (e) {}
+
+        applyUnmirrorPreview();
+
+        cameraVideo.onloadedmetadata = function () {
+          applyUnmirrorPreview();
+        };
+
+        cameraVideo.onplay = function () {
+          applyUnmirrorPreview();
+        };
+      }
+
+      if (cameraBox) cameraBox.classList.add("active");
+      if (analysisResult) {
+        analysisResult.innerHTML = "Camera opened. Keep only one clear face in the frame.";
+      }
+    } catch (err) {
+      if (analysisResult) {
+        analysisResult.innerHTML = "Unable to open camera. Please allow camera access or use Upload Photo.";
+      }
+    }
+  }
+
+  function captureSelfieUnmirrored(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    if (!cameraVideo || !cameraCanvas || !cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+      if (analysisResult) analysisResult.innerHTML = "Camera is not ready yet.";
+      return;
+    }
+
+    cameraCanvas.width = cameraVideo.videoWidth;
+    cameraCanvas.height = cameraVideo.videoHeight;
+
+    const ctx = cameraCanvas.getContext("2d");
+
+    ctx.save();
+
+    /* preview unmirror ke liye video pe scaleX(-1) laga hai,
+       isliye final saved image ko bhi natural direction me lane ke liye
+       canvas draw ko reverse kar rahe hain */
+    ctx.translate(cameraCanvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+
+    ctx.restore();
+
+    uploadedFaceImage = cameraCanvas.toDataURL("image/jpeg", 0.92);
+
+    if (previewImage) previewImage.src = uploadedFaceImage;
+    if (previewArea) previewArea.style.display = "block";
+    if (analyzeBtn) analyzeBtn.disabled = false;
+
+    if (analysisResult) {
+      analysisResult.innerHTML = "Selfie captured. Now click Detect Face Tone.";
+    }
+
+    if (typeof closeCamera === "function") closeCamera();
+    else {
+      if (cameraBox) cameraBox.classList.remove("active");
+      if (cameraStream) {
+        try {
+          cameraStream.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        cameraStream = null;
+      }
+    }
+
+    scrollToDetectToneButton();
+  }
+
+  function replaceButtonWithPatchedHandler(buttonId, handler, mark) {
+    const oldBtn = document.getElementById(buttonId);
+    if (!oldBtn || !oldBtn.parentNode || oldBtn.dataset[mark] === "1") return;
+
+    const newBtn = oldBtn.cloneNode(true);
+    newBtn.dataset[mark] = "1";
+    oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+    newBtn.addEventListener("click", handler, false);
+
+    if (buttonId === "openCameraBtn") {
+      window.openCameraBtn = newBtn;
+    }
+    if (buttonId === "captureSelfieBtn") {
+      window.captureSelfieBtn = newBtn;
+    }
+  }
+
+  function bindPatch() {
+    applyUnmirrorPreview();
+    replaceButtonWithPatchedHandler("openCameraBtn", openCameraUnmirrored, "unmirrorOpenBound");
+    replaceButtonWithPatchedHandler("captureSelfieBtn", captureSelfieUnmirrored, "unmirrorCaptureBound");
+
+    if (cameraVideo && !cameraVideo.dataset.unmirrorPreviewWatch) {
+      cameraVideo.dataset.unmirrorPreviewWatch = "1";
+
+      cameraVideo.addEventListener("loadedmetadata", applyUnmirrorPreview);
+      cameraVideo.addEventListener("play", applyUnmirrorPreview);
+      cameraVideo.addEventListener("loadeddata", applyUnmirrorPreview);
+    }
+  }
+
+  if (uploadInput && !uploadInput.dataset.autoScrollToneBound) {
+    uploadInput.dataset.autoScrollToneBound = "1";
+    uploadInput.addEventListener("change", function () {
+      if (this.files && this.files.length) {
+        scrollToDetectToneButton();
+      }
+    });
+  }
+
+  bindPatch();
+
+  const observer = new MutationObserver(() => {
+    bindPatch();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+})();
